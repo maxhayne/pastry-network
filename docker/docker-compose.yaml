@@ -1,0 +1,36 @@
+# Author: Max Hayne
+
+version: '3'
+
+name: 'pastry'
+
+# Create network for all containers
+# Container names can be used w/ DNS
+networks:
+  pastryNetwork:
+    driver: bridge
+
+services:
+  discovery:
+    build:
+      context: ../ # context is shifted to project parent directory
+      dockerfile: ./docker/Dockerfile # provide path to Dockerfile from parent directory
+      target: discovery # uses 'Discovery run stage' from Dockerfile
+    stdin_open: true # equivalent to -i
+    tty: true # equivalent to -t
+    networks:
+      - pastryNetwork
+  
+  peer:
+    build:
+      context: ../
+      dockerfile: ./docker/Dockerfile
+      target: peer
+    depends_on: 
+      - discovery
+    deploy:
+      replicas: 128 # adjustable
+    stdin_open: true
+    tty: true
+    networks:
+      - pastryNetwork
