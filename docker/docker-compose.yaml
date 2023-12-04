@@ -34,3 +34,15 @@ services:
     tty: true
     networks:
       - pastryNetwork
+
+  store:
+    build:
+      context: ../
+      dockerfile: ./docker/Dockerfile
+      target: store
+    depends_on:
+      - discovery
+    stdin_open: true
+    tty: true
+    networks:
+      - pastryNetwork
