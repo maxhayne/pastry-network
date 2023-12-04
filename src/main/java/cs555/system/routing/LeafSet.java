@@ -3,9 +3,9 @@ package cs555.system.routing;
 import cs555.system.util.PeerInformation;
 
 public class LeafSet {
-  private PeerInformation left = null;
+  private PeerInformation left = null; // closest counterclockwise peer
   private final PeerInformation self;
-  private PeerInformation right = null;
+  private PeerInformation right = null; // closest clockwise peer
 
   public LeafSet(PeerInformation self) {
     this.self = self;

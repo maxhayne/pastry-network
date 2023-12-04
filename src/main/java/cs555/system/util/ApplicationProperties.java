@@ -13,8 +13,10 @@ public interface ApplicationProperties {
                                 "application" + ".properties")
                             .toString();
 
-  String discoveryHost =
-      PropertyLoader.getInstance().getProperty("discoveryHost", "localhost");
+  String discoveryHost = PropertyLoader
+                             .getInstance()
+                             .getProperty("discoveryHost", "localhost")
+                             .strip();
 
   int discoveryPort = Integer.parseInt(
       PropertyLoader.getInstance().getProperty("discoveryPort", "32096"));
@@ -22,5 +24,5 @@ public interface ApplicationProperties {
   String discoveryAddress = discoveryHost + ":" + discoveryPort; // nice-to-have
 
   String logLevel =
-      PropertyLoader.getInstance().getProperty("logLevel", "info");
+      PropertyLoader.getInstance().getProperty("logLevel", "info").strip();
 }

@@ -44,11 +44,8 @@ public class RoutingInformation {
           i.remove();
         }
       }
-    }
-    if (joinMessage != null) {
       joinMessage.getHops().add(self);
-      System.out.printf("%3s%s%n", "",
-          "Join Message Traceroute: " + joinMessage.getTrace());
+      System.out.println("Join Message Traceroute: " + joinMessage.getTrace());
     }
     initializationLatch.countDown();
     displayRoutingInformation();
@@ -62,16 +59,12 @@ public class RoutingInformation {
    */
   public synchronized Set<PeerInformation> getPeerSet(boolean includeSelf) {
     Set<PeerInformation> peerSet = new LinkedHashSet<>();
-    PeerInformation peer;
-    if ((peer = leafSet.getLeft()) != null) {
-      peerSet.add(peer);
-    }
+    peerSet.add(leafSet.getLeft());
     if (includeSelf) {
       peerSet.add(self);
     }
-    if ((peer = leafSet.getRight()) != null) {
-      peerSet.add(peer);
-    }
+    peerSet.add(leafSet.getRight());
+    PeerInformation peer;
     for (int row = 0; row < 4; ++row) {
       for (int col = 0; col < 16; ++col) {
         peer = routingTable.get(row, col);
@@ -80,6 +73,7 @@ public class RoutingInformation {
         }
       }
     }
+    peerSet.remove(null);
     return peerSet;
   }
 
@@ -194,14 +188,14 @@ public class RoutingInformation {
     StringBuilder sb = new StringBuilder();
     if (initializationLatch.getCount() == 0) {
       synchronized(this) {
-        sb.append("   ").append("Leaf Set: ").append(leafSet).append("\n");
-        sb.append("   ").append("Routing Table: ").append("\n");
+        sb.append("  ").append("Leaf Set: ").append(leafSet).append("\n");
+        sb.append("  ").append("Routing Table: ").append("\n");
         for (String row : routingTable.toString().split("\n")) {
-          sb.append("   ").append(row).append("\n");
+          sb.append("  ").append(row).append("\n");
         }
       }
     } else {
-      sb.append("   ").append("Not yet initialized.").append("\n");
+      sb.append("  ").append("Not yet initialized.").append("\n");
     }
     System.out.print(sb);
   }

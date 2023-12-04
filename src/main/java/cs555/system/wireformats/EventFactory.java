@@ -52,6 +52,10 @@ public class EventFactory {
       case Protocol.ID_COLLISION:
       case Protocol.NO_PEERS:
       case Protocol.SELECT_REQUEST:
+      case Protocol.ACCEPT_STORAGE:
+      case Protocol.DENY_STORAGE:
+      case Protocol.WRITE_FAIL:
+      case Protocol.WRITE_SUCCESS:
         return new GeneralMessage(marshalledBytes);
 
       case Protocol.SPECIAL_JOIN:
@@ -59,6 +63,12 @@ public class EventFactory {
 
       case Protocol.PEER_BROADCAST:
         return new PeerBroadcast(marshalledBytes);
+
+      case Protocol.SEEK:
+        return new SeekMessage(marshalledBytes);
+
+      case Protocol.RELAY_FILE:
+        return new RelayFile(marshalledBytes);
 
       default:
         logger.error("Event could not be created. " + marshalledBytes[0]);

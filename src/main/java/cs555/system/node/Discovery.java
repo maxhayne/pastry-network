@@ -83,11 +83,11 @@ public class Discovery implements Node {
       String command = input.split("\\s+")[0];
       switch (command) {
         case "p", "peers":
-          showPeers();
+          displayPeers();
           break;
 
         case "h", "help":
-          showHelp();
+          displayHelp();
           break;
 
         default:
@@ -100,19 +100,19 @@ public class Discovery implements Node {
   /**
    * Print all information about all Peers registered in the network.
    */
-  private synchronized void showPeers() {
+  private synchronized void displayPeers() {
     registeredPeers.forEach(peer -> {
-      System.out.printf("%3s%s%n", "", peer.toString());
+      System.out.printf("%2s%s%n", "", peer.toString());
     });
   }
 
   /**
    * Print a list of valid commands for the user.
    */
-  private void showHelp() {
-    System.out.printf("%3s%-10s : %s%n", "", "p[eers]",
+  private void displayHelp() {
+    System.out.printf("%2s%-10s : %s%n", "", "p[eers]",
         "print a list of peers constituting the network");
-    System.out.printf("%3s%-10s : %s%n", "", "h[elp]",
+    System.out.printf("%2s%-10s : %s%n", "", "h[elp]",
         "print a list of valid commands");
   }
 

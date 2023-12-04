@@ -16,4 +16,10 @@ public interface Protocol {
   byte NO_PEERS = 6;
   byte PEER_BROADCAST = 7;
   byte LEAVE = 8;
+  byte SEEK = 9;
+  byte ACCEPT_STORAGE = 10;
+  byte DENY_STORAGE = 11;
+  byte RELAY_FILE = 12;
+  byte WRITE_SUCCESS = 13;
+  byte WRITE_FAIL = 14;
 }
