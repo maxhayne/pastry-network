@@ -23,4 +23,5 @@ public interface Protocol {
   byte WRITE_SUCCESS = 13;
   byte WRITE_FAIL = 14;
   byte SERVE_FILE = 15;
+  byte REPLACE_LEAF = 16;
 }

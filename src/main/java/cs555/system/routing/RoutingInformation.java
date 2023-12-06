@@ -197,4 +197,8 @@ public class RoutingInformation {
     }
     System.out.print(sb);
   }
+
+  public LeafSet getLeafSet() {
+    return leafSet;
+  }
 }

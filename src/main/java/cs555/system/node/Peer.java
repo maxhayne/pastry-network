@@ -1,5 +1,6 @@
 package cs555.system.node;
 
+import cs555.system.routing.LeafSet;
 import cs555.system.routing.RoutingInformation;
 import cs555.system.transport.TCPConnection;
 import cs555.system.transport.TCPConnectionCache;
@@ -115,8 +116,29 @@ public class Peer implements Node {
         removePeerFromRouting(((PeerMessage) event).getPeer());
         break;
 
+      case Protocol.REPLACE_LEAF:
+        replaceLeaf(event);
+        break;
+
       default:
         logger.debug("Event couldn't be processed. " + event.getType());
+    }
+  }
+
+  private void replaceLeaf(Event event) {
+    ReplaceLeaf message = ((ReplaceLeaf) event);
+    logger.debug("Replacing " + message.getLeavingPeer().getIdentifier() + " " +
+                 "with " + message.getReplacement().getIdentifier());
+    boolean modified;
+    synchronized(routingInformation) {
+      modified = routingInformation.removePeer(message.getLeavingPeer());
+      if (routingInformation.addPeer(message.getReplacement())) {
+        modified = true;
+      }
+    }
+    if (modified) {
+      System.out.println("ROUTING UPDATED:");
+      routingInformation.displayRoutingInformation();
     }
   }
 
@@ -236,16 +258,15 @@ public class Peer implements Node {
     Path remotePath = Paths.get(message.getPath());
     Path localPath = getFilePath(remotePath.getFileName().toString());
 
-    byte type = files.contains(localPath) ? Protocol.DENY_STORAGE :
-                    Protocol.ACCEPT_STORAGE;
+    byte type = !files.contains(localPath) ? Protocol.ACCEPT_STORAGE :
+                    Protocol.DENY_STORAGE;
 
-    // Adding the hops to the message in GeneralMessage
+    // Adding the hops to the message string in GeneralMessage
     // A little lazy, but creating another message type for this is too much
-    String joinedHops = message
-                            .getHops()
-                            .stream()
-                            .map(PeerInformation::getIdentifier)
-                            .collect(Collectors.joining(","));
+    String joinedHops = message.getHops()
+                               .stream()
+                               .map(PeerInformation::getIdentifier)
+                               .collect(Collectors.joining(","));
 
     String pathAndHops = String.join("|", remotePath.toString(), joinedHops);
 
@@ -417,49 +438,53 @@ public class Peer implements Node {
   }
 
   /**
-   * Gracefully leaves the P2P network. First sends deregistration request to
-   * the Discovery, then attempts to relocate local files to appropriate
-   * replacement peers.
+   * Gracefully leaves the P2P network. First, sends a deregistration request to
+   * the Discovery, then updates the leaf sets of each leaf, and attempts to
+   * relocate local files to appropriate replacement peers.
    */
   private void leave() {
     logger.debug("Notifying the Discovery node of deregistration.");
-    // Deregister with Discovery
     PeerMessage deregister = new PeerMessage(Protocol.DEREGISTER, self);
     connections.send(ApplicationProperties.discoveryAddress, deregister, false);
 
-    logger.debug("Notifying peers of exit.");
-    // Notify other peers as a courtesy
-    PeerMessage leave = new PeerMessage(Protocol.LEAVE, self);
-    Set<PeerInformation> peerSet = routingInformation.getPeerSet(false);
-    for (PeerInformation peer : peerSet) {
-      connections.send(peer.getAddress(), leave, false);
-    }
+    logger.debug("Updating neighboring LeafSets.");
+    updateNeighboringLeafSets();
 
-    // TODO Does more need to be done to leave the routing tables of the
-    //  remaining peers in correct order?
+    logger.debug("Notifying peers of exit.");
+    notifyPeersOfExit();
 
     // Sleep to wait for any remaining messages to be processed
     try {
       logger.debug("Waiting 1 second for remaining messages to be processed.");
       Thread.sleep(1000);
-    } catch (InterruptedException e) {
-      logger.error("Interrupted. " + e.getMessage());
-    }
-
-    // Attempt to relocate all local files to the best peer
-    // Could just send the file to any peer, and let the routing do the rest,
-    // but that would be wasteful of network activity. Wrote a couple of
-    // functions that somewhat violate DRY to find the closest non-self peers
-    migrateFilesBeforeLeaving();
-
-    // Sleep to wait for messages to send
-    try {
-      logger.debug("Waiting 1 second for files to be sent to other peers.");
+      migrateFilesBeforeLeaving();
+      logger.debug("Waiting 1 second for sockets to clear.");
       Thread.sleep(1000);
     } catch (InterruptedException e) {
       logger.error("Interrupted. " + e.getMessage());
     }
+  }
 
+  private void updateNeighboringLeafSets() {
+    LeafSet leafSet = routingInformation.getLeafSet();
+    synchronized(routingInformation) {
+      if (leafSet.getLeft() != null &&
+          !leafSet.getLeft().equals(leafSet.getRight())) {
+        ReplaceLeaf message = new ReplaceLeaf(self, leafSet.getRight());
+        connections.send(leafSet.getLeft().getAddress(), message, false);
+
+        message.setReplacement(leafSet.getLeft());
+        connections.send(leafSet.getRight().getAddress(), message, false);
+      }
+    }
+  }
+
+  private void notifyPeersOfExit() {
+    PeerMessage leave = new PeerMessage(Protocol.LEAVE, self);
+    Set<PeerInformation> peerSet = routingInformation.getPeerSet(false);
+    for (PeerInformation peer : peerSet) {
+      connections.send(peer.getAddress(), leave, false);
+    }
   }
 
   private void migrateFilesBeforeLeaving() {
@@ -478,9 +503,10 @@ public class Peer implements Node {
           closestPeer = getClosestPeer(key, peerSet);
         }
         if (closestPeer != null) {
-          logger.info("File " + path + " sent to " + closestPeer);
+          logger.info("File " + path.getFileName() + " sent to " +
+                      closestPeer.getIdentifier());
         } else {
-          logger.info("File " + path + " is permanently lost.");
+          logger.info("File " + path.getFileName() + " is permanently lost.");
         }
       }
     }

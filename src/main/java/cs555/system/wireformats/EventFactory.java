@@ -73,6 +73,9 @@ public class EventFactory {
       case Protocol.SERVE_FILE:
         return new ServeFile(marshalledBytes);
 
+      case Protocol.REPLACE_LEAF:
+        return new ReplaceLeaf(marshalledBytes);
+
       default:
         logger.error("Event could not be created. " + marshalledBytes[0]);
         return null;

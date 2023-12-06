@@ -397,9 +397,9 @@ public class StoreData implements Node {
   private void displayHelp() {
     System.out.printf("%2s%-21s : %s%n", "", "s[tore] path/filename",
         "store a file on the network");
-    System.out.printf("%2s%-21s : %s%n", "", "r[etrieve] # [#...]",
+    System.out.printf("%2s%-21s : %s%n", "", "r[etrieve] filename",
         "retrieve a file stored previously on the network");
-    System.out.printf("%2s%-21s : %s%n", "", "d[elete] # [#...]",
+    System.out.printf("%2s%-21s : %s%n", "", "d[elete] filename",
         "delete a file stored previously on the network");
     System.out.printf("%2s%-21s : %s%n", "", "f[iles]",
         "list the files this node has stored");
