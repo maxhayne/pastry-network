@@ -9,11 +9,11 @@ import cs555.system.util.Logger;
 import cs555.system.util.PeerInformation;
 import cs555.system.wireformats.*;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Random;
@@ -25,18 +25,26 @@ import java.util.concurrent.LinkedBlockingQueue;
 public class StoreData implements Node {
 
   private static final Logger logger = Logger.getInstance();
+  public final static String STORE = "STORE";
+  public final static String RETRIEVE = "RETRIEVE";
+  public final static String DELETE = "DELETE";
   private final String host;
   private final int port;
   private final TCPConnectionCache connections;
-  private final BlockingQueue<Path> filesAwaitingDiscovery;
   private final ConcurrentSkipListSet<Path> storedFiles;
+  private final BlockingQueue<Operation> ops;
+  private Path workingDirectory;
+
+  public record Operation(String type, Path path) {}
 
   public StoreData(String host, int port) {
     this.host = host;
     this.port = port;
     this.connections = new TCPConnectionCache(this);
-    this.filesAwaitingDiscovery = new LinkedBlockingQueue<>();
     this.storedFiles = new ConcurrentSkipListSet<>();
+    this.workingDirectory = Paths.get(System.getProperty("user.dir"), "data");
+    this.ops = new LinkedBlockingQueue<Operation>();
+
   }
 
   public static void main(String[] args) {
@@ -61,30 +69,73 @@ public class StoreData implements Node {
   @Override
   public void onEvent(Event event, TCPConnection connection) {
     switch (event.getType()) {
-      case Protocol.NO_PEERS:
-        logger.info(
-            "No peers available to store " + filesAwaitingDiscovery.poll());
-        break;
-
       case Protocol.SELECT_RESPONSE:
-        initiateFileStorage(event, filesAwaitingDiscovery.poll());
+        PeerInformation random = ((PeerMessage) event).getPeer();
+        initiateFileOperation(random);
         break;
 
-      case Protocol.DENY_STORAGE:
-        storageDenied(event);
+      case Protocol.NO_PEERS:
+        initiateFileOperation(null);
         break;
 
       case Protocol.ACCEPT_STORAGE:
         sendFileToPeer(event, connection);
         break;
 
+      case Protocol.DENY_STORAGE:
+        storageDenied(event);
+        break;
+
       case Protocol.WRITE_SUCCESS, Protocol.WRITE_FAIL:
         writeHandler(event);
+        break;
+
+      case Protocol.SERVE_FILE:
+        receiveFile(event);
         break;
 
       default:
         logger.debug("Event couldn't be processed. " + event.getType());
         break;
+    }
+  }
+
+  private void receiveFile(Event event) {
+    ServeFile message = ((ServeFile) event);
+    byte[] content = message.getContent();
+    if (content != null) {
+      writeReceivedFile(message.getFilename(), content);
+    } else {
+      logger.info(
+          "The received content for " + message.getFilename() + " is null.");
+    }
+  }
+
+  private void writeReceivedFile(String filename, byte[] content) {
+    try {
+      Path writeDirectory = Paths.get(System.getProperty("user.dir"), "reads");
+      Files.createDirectories(writeDirectory);
+      Path path = writeDirectory.resolve(filename);
+      Files.write(path, content);
+      logger.info("Wrote " + filename + " to the 'reads' directory.");
+    } catch (IOException e) {
+      logger.info("Unable to write " + filename + " to disk.");
+    }
+  }
+
+  private void initiateFileOperation(PeerInformation peer) {
+    Operation op = ops.poll();
+    if (op != null) {
+      if (peer == null) {
+        logger.info("Cannot " + op.type() + " " + op.path() + ". No peers.");
+        if (op.type().equals(DELETE)) {
+          storedFiles.clear();
+        }
+      } else {
+        initiateOperation(peer, op);
+      }
+    } else {
+      logger.debug("There are no operations to initiate.");
     }
   }
 
@@ -144,33 +195,28 @@ public class StoreData implements Node {
     }
   }
 
-
-  private void initiateFileStorage(Event event, Path path) {
-    if (path == null) {
-      logger.info("There is no file waiting to be stored on the network.");
-      return;
-    }
-
-    PeerInformation randomPeer = ((PeerMessage) event).getPeer();
-
-    String filePath = path.toString();
-    String filename = path.getFileName().toString();
+  private void initiateOperation(PeerInformation peer, Operation op) {
+    String path = op.path().toString();
+    String filename = op.path().getFileName().toString();
 
     // Generate a key from the filename of the file being stored
     String key = generateKeyFromFilename(filename);
 
-    SeekMessage seekMessage = new SeekMessage(key, filePath, host + ":" + port);
-    boolean sent =
-        connections.send(randomPeer.getAddress(), seekMessage, false);
+    SeekMessage message =
+        new SeekMessage(op.type(), key, path, host + ":" + port);
+    boolean sent = connections.send(peer.getAddress(), message, false);
 
     if (!sent) {
-      filesAwaitingDiscovery.add(path);
+      ops.add(op);
       GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
       connections.send(ApplicationProperties.discoveryAddress, select, true);
     } else {
-      logger.info(randomPeer.getIdentifier() + " is our random peer for " +
-                  "for storing " + filePath + ", whose filename identifier is" +
-                  " " + key + ".");
+      logger.info(
+          peer.getIdentifier() + " is our random peer to " + op.type() + " " +
+          path + ", whose generated identifier is " + key + ".");
+      if (op.type().equals(DELETE)) {
+        storedFiles.removeIf(p -> p.getFileName().toString().equals(filename));
+      }
     }
   }
 
@@ -195,12 +241,24 @@ public class StoreData implements Node {
           store(splitCommand);
           break;
 
+        case "r", "retrieve":
+          retrieve(splitCommand);
+          break;
+
+        case "d", "delete":
+          delete(splitCommand);
+          break;
+
         case "f", "files":
           displayFiles();
           break;
 
+        case "wd":
+          printWorkingDirectory(splitCommand);
+          break;
+
         case "h", "help":
-          showHelp();
+          displayHelp();
           break;
 
         case "e", "exit":
@@ -226,31 +284,117 @@ public class StoreData implements Node {
       return;
     }
 
-    String filename = command[1];
+    Path path = parsePath(command[1]);
+    Operation storeOp = new Operation(STORE, path);
+    ops.add(storeOp);
 
-    Path filePath;
-    try {
-      filePath = Paths.get(System.getProperty("user.dir"), filename);
-      filePath = filePath.normalize();
-    } catch (InvalidPathException e) {
-      logger.info("Path cannot be discerned from filename. " + e.getMessage());
+    GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
+    boolean sentMessage =
+        connections.send(ApplicationProperties.discoveryAddress, select, true);
+    if (!sentMessage) {
+      ops.remove(storeOp);
+    }
+  }
+
+  private void retrieve(String[] command) {
+    if (command.length == 1) {
+      logger.error("You must provide a filename. Use 'help' for usage.");
       return;
     }
 
-    filesAwaitingDiscovery.add(filePath);
+    Path path = Paths.get(command[1]);
+    Operation retrieveOp = new Operation(RETRIEVE, path);
+    ops.add(retrieveOp);
 
     GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
-    boolean sent =
+    boolean sentMessage =
         connections.send(ApplicationProperties.discoveryAddress, select, true);
-    if (!sent) {
-      filesAwaitingDiscovery.remove(filePath);
+    if (!sentMessage) {
+      ops.remove(retrieveOp);
     }
+  }
+
+  private void delete(String[] command) {
+    if (command.length == 1) {
+      logger.error("You must provide a filename. Use 'help' for usage.");
+      return;
+    }
+
+    Path path = Paths.get(command[1]);
+    Operation deleteOp = new Operation(DELETE, path);
+    ops.add(deleteOp);
+
+    GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
+    boolean sentMessage =
+        connections.send(ApplicationProperties.discoveryAddress, select, true);
+    if (!sentMessage) {
+      ops.remove(deleteOp);
+    }
+  }
+
+  /**
+   * Either prints the current value of 'workingDirectory', or tries to set it
+   * based on input from the user.
+   *
+   * @param command String[] of command from user
+   */
+  private void printWorkingDirectory(String[] command) {
+    if (command.length > 1) {
+      setWorkingDirectory(command[1]);
+    }
+    System.out.printf("%2s%s%n", "", workingDirectory.toString());
+  }
+
+  /**
+   * Takes a string representing a possible path and converts it to a path
+   * object, replacing a leading tilde with the home directory, if possible.
+   *
+   * @param pathString String of possible path
+   * @return Path object based on the pathString
+   */
+  private Path parsePath(String pathString) {
+    Path parsedPath;
+    if (pathString.startsWith("~")) {
+      pathString = pathString.replaceFirst("~", "");
+      pathString = removeLeadingFileSeparators(pathString);
+      parsedPath = Paths.get(System.getProperty("user.home"));
+    } else {
+      parsedPath = workingDirectory;
+    }
+    if (!pathString.isEmpty()) {
+      parsedPath = parsedPath.resolve(pathString);
+    }
+    return parsedPath.normalize(); // clean up path
+  }
+
+  /**
+   * Sets the working directory based on input from the user.
+   *
+   * @param workdir new desired working directory
+   */
+  private void setWorkingDirectory(String workdir) {
+    workingDirectory = parsePath(workdir);
+  }
+
+  /**
+   * Removes leading file separators from a String. Helps to make sure calls
+   * like 'pwd ~/' and 'pwd ~' and 'pwd ~///' all evaluate to the home
+   * directory.
+   *
+   * @param directory String to be modified
+   * @return string leading file separators removed
+   */
+  private String removeLeadingFileSeparators(String directory) {
+    while (!directory.isEmpty() && directory.startsWith(File.separator)) {
+      directory = directory.substring(1);
+    }
+    return directory;
   }
 
   /**
    * Print a list of valid commands for the user.
    */
-  private void showHelp() {
+  private void displayHelp() {
     System.out.printf("%2s%-21s : %s%n", "", "s[tore] path/filename",
         "store a file on the network");
     System.out.printf("%2s%-21s : %s%n", "", "r[etrieve] # [#...]",
@@ -259,6 +403,8 @@ public class StoreData implements Node {
         "delete a file stored previously on the network");
     System.out.printf("%2s%-21s : %s%n", "", "f[iles]",
         "list the files this node has stored");
+    System.out.printf("%2s%-21s : %s%n", "", "wd [new_workdir]",
+        "print the current working directory or change it");
     System.out.printf("%2s%-21s : %s%n", "", "e[xit]", "shut down this node");
     System.out.printf("%2s%-21s : %s%n", "", "h[elp]",
         "print a list of valid commands");

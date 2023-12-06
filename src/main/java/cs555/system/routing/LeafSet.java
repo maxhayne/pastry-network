@@ -12,38 +12,6 @@ public class LeafSet {
   }
 
   /**
-   * If the key is within the bounds of the leaf set, returns the node closest
-   * to that key.
-   *
-   * @param key key to check distance to
-   * @return closest leaf to key, null if key isn't within bounds of leaf set
-   */
-  public synchronized PeerInformation closestLeaf(String key) {
-    PeerInformation closest = null;
-    if (left == null || right == null) {
-      closest = self;
-    } else if (self.distanceToRight(right) >= self.distanceToRight(key) ||
-               self.distanceToLeft(left) >= self.distanceToLeft(key)) {
-      // Check if within bounds, and if it is, return closest leaf
-      int leftDistance = left.distanceTo(key);
-      int selfDistance = self.distanceTo(key);
-      int rightDistance = right.distanceTo(key);
-      int minDistance =
-          Math.min(Math.min(leftDistance, rightDistance), selfDistance);
-      if (leftDistance == minDistance) {
-        closest = left;
-      } else if (rightDistance == minDistance) {
-        closest = right;
-      } else {
-        closest = self;
-      }
-    }
-    System.out.println(
-        "Checking " + key + ", returning " + closest + " " + this.toString());
-    return closest;
-  }
-
-  /**
    * Adds a peer to the leaf set if it is closer to self than the current left
    * or right nodes. If the peer is added to the leaf set, the node it replaced
    * is returned.

@@ -70,6 +70,9 @@ public class EventFactory {
       case Protocol.RELAY_FILE:
         return new RelayFile(marshalledBytes);
 
+      case Protocol.SERVE_FILE:
+        return new ServeFile(marshalledBytes);
+
       default:
         logger.error("Event could not be created. " + marshalledBytes[0]);
         return null;

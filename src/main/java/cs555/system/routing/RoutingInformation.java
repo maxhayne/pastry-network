@@ -81,9 +81,7 @@ public class RoutingInformation {
    * Returns the peer that is closest in id-space to the key. If there are two
    * peers in the network that are equidistant from the key, this function will
    * return the one that is counter-clockwise (left) of the key in id-space.
-   * This is guaranteed by the order of the peer set, as the leaf set is added
-   * first in a left-to-right manner, followed by the contents of the routing
-   * table.
+   * This is guaranteed by the order used to check the peers.
    *
    * @param key key to compare against
    * @return peer whose id is closest numerically to the key

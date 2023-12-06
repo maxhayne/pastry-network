@@ -157,9 +157,6 @@ public class Peer implements Node {
     }
   }
 
-  // TODO sent notification back to StoreData about whether the operation was
-  //  successful or not. This means that the RelayFile message must have the
-  //  address of the StoreData node that originated it.
   private void storeFile(RelayFile message) {
     Path path = getFilePath(message.getFilename());
     boolean written = files.writeFile(path, message.getContent());
@@ -171,7 +168,7 @@ public class Peer implements Node {
     }
 
     // Send status message back to StoreData if necessary
-    if (!message.getAddress().isEmpty()) {
+    if (!message.getAddress().isEmpty()) { // if originally from StoreData
       byte type = written ? Protocol.WRITE_SUCCESS : Protocol.WRITE_FAIL;
       GeneralMessage response = new GeneralMessage(type, message.getFilename());
       connections.send(message.getAddress(), response, false);
@@ -226,15 +223,19 @@ public class Peer implements Node {
     PeerInformation next =
         relay(message.getKey(), message, message.getHops().size());
     if (self.equals(next)) {
-      contactStoreData(message);
+      String operation = message.getOperation();
+      switch (operation) {
+        case StoreData.STORE -> issueStorageDecision(message);
+        case StoreData.RETRIEVE -> serveFile(message);
+        case StoreData.DELETE -> deleteFile(message);
+      }
     }
   }
 
-  private void contactStoreData(SeekMessage message) {
+  private void issueStorageDecision(SeekMessage message) {
     Path remotePath = Paths.get(message.getPath());
-    String filename = remotePath.getFileName().toString();
+    Path localPath = getFilePath(remotePath.getFileName().toString());
 
-    Path localPath = getFilePath(filename);
     byte type = files.contains(localPath) ? Protocol.DENY_STORAGE :
                     Protocol.ACCEPT_STORAGE;
 
@@ -250,6 +251,23 @@ public class Peer implements Node {
 
     GeneralMessage response = new GeneralMessage(type, pathAndHops);
     connections.send(message.getRequestAddress(), response, true);
+  }
+
+  private void serveFile(SeekMessage message) {
+    Path remotePath = Paths.get(message.getPath());
+    String filename = remotePath.getFileName().toString();
+    Path localPath = getFilePath(filename);
+
+    byte[] content = files.readFile(localPath);
+    ServeFile response = new ServeFile(filename, content);
+    connections.send(message.getRequestAddress(), response, false);
+  }
+
+  private void deleteFile(SeekMessage message) {
+    Path remotePath = Paths.get(message.getPath());
+    Path localPath = getFilePath(remotePath.getFileName().toString());
+    logger.debug("Deleting " + localPath);
+    files.deleteFile(localPath);
   }
 
   private void removePeerFromRouting(PeerInformation peer) {
@@ -416,6 +434,9 @@ public class Peer implements Node {
     for (PeerInformation peer : peerSet) {
       connections.send(peer.getAddress(), leave, false);
     }
+
+    // TODO Does more need to be done to leave the routing tables of the
+    //  remaining peers in correct order?
 
     // Sleep to wait for any remaining messages to be processed
     try {

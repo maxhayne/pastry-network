@@ -9,13 +9,16 @@ import java.util.ArrayList;
 public class SeekMessage implements Event {
 
   private final byte type;
+  private final String operation;
   private final String key;
   private final String path;
   private final String requestAddress;
   private final ArrayList<PeerInformation> hops;
 
-  public SeekMessage(String key, String path, String requestAddress) {
+  public SeekMessage(String operation, String key, String path,
+      String requestAddress) {
     this.type = Protocol.SEEK;
+    this.operation = operation;
     this.key = key;
     this.path = path;
     this.requestAddress = requestAddress;
@@ -29,6 +32,11 @@ public class SeekMessage implements Event {
     type = din.readByte();
 
     int len = din.readInt();
+    byte[] opBytes = new byte[len];
+    din.readFully(opBytes);
+    operation = new String(opBytes);
+
+    len = din.readInt();
     byte[] keyBytes = new byte[len];
     din.readFully(keyBytes);
     key = new String(keyBytes);
@@ -52,6 +60,10 @@ public class SeekMessage implements Event {
 
     din.close();
     bin.close();
+  }
+
+  public String getOperation() {
+    return operation;
   }
 
   public String getKey() {
@@ -85,6 +97,10 @@ public class SeekMessage implements Event {
     DataOutputStream dout = new DataOutputStream(bout);
 
     dout.write(type);
+
+    byte[] opBytes = operation.getBytes();
+    dout.writeInt(opBytes.length);
+    dout.write(opBytes);
 
     byte[] keyBytes = key.getBytes();
     dout.writeInt(keyBytes.length);
