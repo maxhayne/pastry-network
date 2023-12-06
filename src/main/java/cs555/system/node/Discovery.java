@@ -60,7 +60,7 @@ public class Discovery implements Node {
           new Discovery(InetAddress.getLocalHost().getHostName(),
               serverSocket.getLocalPort());
 
-      new Thread(new TCPServerThread(discovery, serverSocket)).start();
+      (new Thread(new TCPServerThread(discovery, serverSocket))).start();
       logger.info("Discovery started at " + discovery.getHost() + ":" +
                   discovery.getPort());
 

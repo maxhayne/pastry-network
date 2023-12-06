@@ -49,17 +49,15 @@ public class StoreData implements Node {
 
   public static void main(String[] args) {
     try (ServerSocket serverSocket = new ServerSocket(0)) {
-
       StoreData node =
           new StoreData(InetAddress.getLocalHost().getHostAddress(),
               serverSocket.getLocalPort());
 
-      new Thread(new TCPServerThread(node, serverSocket)).start();
+      (new Thread(new TCPServerThread(node, serverSocket))).start();
       logger.info(
           "StoreData started at " + node.getHost() + ":" + node.getPort());
 
       node.interact();
-
     } catch (IOException e) {
       logger.error("StoreData didn't start up properly. " + e.getMessage());
       System.exit(1);
@@ -100,29 +98,6 @@ public class StoreData implements Node {
     }
   }
 
-  private void receiveFile(Event event) {
-    ServeFile message = ((ServeFile) event);
-    byte[] content = message.getContent();
-    if (content != null) {
-      writeReceivedFile(message.getFilename(), content);
-    } else {
-      logger.info(
-          "The received content for " + message.getFilename() + " is null.");
-    }
-  }
-
-  private void writeReceivedFile(String filename, byte[] content) {
-    try {
-      Path writeDirectory = Paths.get(System.getProperty("user.dir"), "reads");
-      Files.createDirectories(writeDirectory);
-      Path path = writeDirectory.resolve(filename);
-      Files.write(path, content);
-      logger.info("Wrote " + filename + " to the 'reads' directory.");
-    } catch (IOException e) {
-      logger.info("Unable to write " + filename + " to disk.");
-    }
-  }
-
   private void initiateFileOperation(PeerInformation peer) {
     Operation op = ops.poll();
     if (op != null) {
@@ -139,28 +114,28 @@ public class StoreData implements Node {
     }
   }
 
-  private void storageDenied(Event event) {
-    String[] split = ((GeneralMessage) event).getMessage().split("\\|");
+  private void initiateOperation(PeerInformation peer, Operation op) {
+    String path = op.path().toString();
+    String filename = op.path().getFileName().toString();
 
-    String filename = split[0];
-    String trace = split[1].replaceAll(",", " -> ");
+    // Generate a key from the filename of the file being stored
+    String key = generateKeyFromFilename(filename);
 
-    logger.info("Peer denied storage request for " + filename + ". " +
-                "Possible filename conflict.");
-    logger.info("Traceroute of file lookup: " + trace);
-  }
+    SeekMessage message =
+        new SeekMessage(op.type(), key, path, host + ":" + port);
+    boolean sent = connections.send(peer.getAddress(), message, false);
 
-  private void writeHandler(Event event) {
-    GeneralMessage message = ((GeneralMessage) event);
-
-    String filename = message.getMessage();
-
-    if (message.getType() == Protocol.WRITE_SUCCESS) {
-      logger.info("Storage operation of " + filename + " succeeded. ");
+    if (!sent) {
+      ops.add(op);
+      GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
+      connections.send(ApplicationProperties.discoveryAddress, select, true);
     } else {
-      logger.info("Storage operation of " + filename + " failed. ");
-      storedFiles.removeIf(
-          path -> path.getFileName().toString().equals(filename));
+      logger.info(
+          peer.getIdentifier() + " is our random peer to " + op.type() + " " +
+          path + ", whose generated identifier is " + key + ".");
+      if (op.type().equals(DELETE)) {
+        storedFiles.removeIf(p -> p.getFileName().toString().equals(filename));
+      }
     }
   }
 
@@ -195,28 +170,51 @@ public class StoreData implements Node {
     }
   }
 
-  private void initiateOperation(PeerInformation peer, Operation op) {
-    String path = op.path().toString();
-    String filename = op.path().getFileName().toString();
+  private void storageDenied(Event event) {
+    String[] split = ((GeneralMessage) event).getMessage().split("\\|");
 
-    // Generate a key from the filename of the file being stored
-    String key = generateKeyFromFilename(filename);
+    String filename = split[0];
+    String trace = split[1].replaceAll(",", " -> ");
 
-    SeekMessage message =
-        new SeekMessage(op.type(), key, path, host + ":" + port);
-    boolean sent = connections.send(peer.getAddress(), message, false);
+    logger.info("Peer denied storage request for " + filename + ". " +
+                "Possible filename conflict.");
+    logger.info("Traceroute of file lookup: " + trace);
+  }
 
-    if (!sent) {
-      ops.add(op);
-      GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
-      connections.send(ApplicationProperties.discoveryAddress, select, true);
+  private void writeHandler(Event event) {
+    GeneralMessage message = ((GeneralMessage) event);
+
+    String filename = message.getMessage();
+
+    if (message.getType() == Protocol.WRITE_SUCCESS) {
+      logger.info("Storage operation of " + filename + " succeeded. ");
+    } else {
+      logger.info("Storage operation of " + filename + " failed. ");
+      storedFiles.removeIf(
+          path -> path.getFileName().toString().equals(filename));
+    }
+  }
+
+  private void receiveFile(Event event) {
+    ServeFile message = ((ServeFile) event);
+    byte[] content = message.getContent();
+    if (content != null) {
+      writeReceivedFile(message.getFilename(), content);
     } else {
       logger.info(
-          peer.getIdentifier() + " is our random peer to " + op.type() + " " +
-          path + ", whose generated identifier is " + key + ".");
-      if (op.type().equals(DELETE)) {
-        storedFiles.removeIf(p -> p.getFileName().toString().equals(filename));
-      }
+          "The received content for " + message.getFilename() + " is null.");
+    }
+  }
+
+  private void writeReceivedFile(String filename, byte[] content) {
+    try {
+      Path writeDirectory = Paths.get(System.getProperty("user.dir"), "reads");
+      Files.createDirectories(writeDirectory);
+      Path path = writeDirectory.resolve(filename);
+      Files.write(path, content);
+      logger.info("Wrote " + filename + " to the 'reads' directory.");
+    } catch (IOException e) {
+      logger.info("Unable to write " + filename + " to disk.");
     }
   }
 

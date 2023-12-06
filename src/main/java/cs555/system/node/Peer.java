@@ -54,7 +54,7 @@ public class Peer implements Node {
       // Join the network
       if (peer.sendRegistrationToDiscovery()) {
         TCPServerThread serverThread = new TCPServerThread(peer, serverSocket);
-        new Thread(serverThread).start();
+        (new Thread(serverThread)).start();
         peer.interact();
       }
     } catch (IOException e) {
@@ -125,6 +125,115 @@ public class Peer implements Node {
     }
   }
 
+  /**
+   * Interprets the response from the Discovery node concerning a registration
+   * request. If the response's attached PeerInformation is equal to this Peer's
+   * PeerInformation, no other Peer is contacted. Otherwise, a SPECIAL_JOIN
+   * message is sent to the random peer.
+   *
+   * @param event message being processed
+   */
+  private void registrationHandler(Event event) {
+    if (event.getType() == Protocol.NO_PEERS) {
+      printRegistrationDetails(null);
+      routingInformation.initialize(self, null, null);
+    } else {
+      PeerInformation selectPeer = ((PeerMessage) event).getPeer();
+      JoinMessage joinMessage = new JoinMessage(self);
+      joinMessage.getHops().add(self);
+      if (!connections.send(selectPeer.getAddress(), joinMessage, false)) {
+        PeerMessage select = new PeerMessage(Protocol.SELECT_REQUEST, self);
+        connections.send(ApplicationProperties.discoveryAddress, select, true);
+      } else {
+        printRegistrationDetails(selectPeer);
+      }
+    }
+  }
+
+  private void printRegistrationDetails(PeerInformation randomPeer) {
+    System.out.println("Registered as " + self);
+    if (randomPeer != null) {
+      System.out.println("Entry peer: " + randomPeer);
+    } else {
+      System.out.println("We are the first peer to join the network.");
+    }
+  }
+
+  private void collisionHandler() {
+    self.setIdentifier(PeerInformation.generateIdentifier());
+    sendRegistrationToDiscovery();
+  }
+
+  private void buildRoutingInformation(JoinMessage joinMessage) {
+    routingInformation.initialize(self, joinMessage, connections);
+  }
+
+  private void attachRoutingInformation(JoinMessage message) {
+    routingInformation.attachRoutingToJoinMessage(message);
+    message.getHops().add(self);
+
+    String key = message.getDestination().getIdentifier();
+    int hop = message.getHops().size();
+    PeerInformation next = relay(key, message, hop);
+    if (self.equals(next)) { // Forward directly to destination
+      String destAddress = message.getDestination().getAddress();
+      boolean sent = connections.send(destAddress, message, false);
+      // TODO create a function that will generate a log message for a
+      //  message relay based on type and key and hop count and success
+      if (sent) {
+        logger.info("Message type " + message.getType() + " with key " + key +
+                    " relayed to " + key + ", hop " + hop);
+      } else {
+        logger.info("Join message couldn't be relayed to destination.");
+      }
+    }
+  }
+
+  private void routeSeekMessage(Event event) {
+    SeekMessage message = (SeekMessage) event;
+    message.addHop(self);
+    PeerInformation next =
+        relay(message.getKey(), message, message.getHops().size());
+    if (self.equals(next)) {
+      String operation = message.getOperation();
+      switch (operation) {
+        case StoreData.STORE -> issueStorageDecision(message);
+        case StoreData.RETRIEVE -> serveFile(message);
+        case StoreData.DELETE -> deleteFile(message);
+      }
+    }
+  }
+
+  private void fileHandler(Event event) {
+    RelayFile message = (RelayFile) event;
+    message.incrementHops();
+    PeerInformation next = relay(message.getKey(), message, message.getHops());
+    if (self.equals(next)) { // We should store the file
+      storeFile(message);
+      next = routingInformation.lookup(message.getKey());
+      if (!self.equals(next)) {
+        migrateFiles();
+      }
+    }
+  }
+
+  private void integrateNewPeer(Event event) {
+    PeerBroadcast broadcast = (PeerBroadcast) event;
+    boolean added = routingInformation.addPeer(broadcast.getPeer());
+    for (PeerInformation peer : broadcast.getContents()) {
+      if (!self.equals(peer)) {
+        if (routingInformation.addPeer(peer)) {
+          added = true;
+        }
+      }
+    }
+    if (added) {
+      System.out.println("ROUTING UPDATED:");
+      routingInformation.displayRoutingInformation();
+      migrateFiles();
+    }
+  }
+
   private void replaceLeaf(Event event) {
     ReplaceLeaf message = ((ReplaceLeaf) event);
     logger.debug("Replacing " + message.getLeavingPeer().getIdentifier() + " " +
@@ -139,19 +248,6 @@ public class Peer implements Node {
     if (modified) {
       System.out.println("ROUTING UPDATED:");
       routingInformation.displayRoutingInformation();
-    }
-  }
-
-  private void fileHandler(Event event) {
-    RelayFile message = (RelayFile) event;
-    message.incrementHops();
-    PeerInformation next = relay(message.getKey(), message, message.getHops());
-    if (self.equals(next)) { // We should store the file
-      storeFile(message);
-      next = routingInformation.lookup(message.getKey());
-      if (!self.equals(next)) {
-        migrateFiles();
-      }
     }
   }
 
@@ -239,18 +335,10 @@ public class Peer implements Node {
     return next;
   }
 
-  private void routeSeekMessage(Event event) {
-    SeekMessage message = (SeekMessage) event;
-    message.addHop(self);
-    PeerInformation next =
-        relay(message.getKey(), message, message.getHops().size());
-    if (self.equals(next)) {
-      String operation = message.getOperation();
-      switch (operation) {
-        case StoreData.STORE -> issueStorageDecision(message);
-        case StoreData.RETRIEVE -> serveFile(message);
-        case StoreData.DELETE -> deleteFile(message);
-      }
+  private void removePeerFromRouting(PeerInformation peer) {
+    boolean removed = routingInformation.removePeer(peer);
+    if (removed) {
+      routingInformation.displayRoutingInformation();
     }
   }
 
@@ -290,96 +378,6 @@ public class Peer implements Node {
     logger.debug("Deleting " + localPath);
     files.deleteFile(localPath);
   }
-
-  private void removePeerFromRouting(PeerInformation peer) {
-    boolean removed = routingInformation.removePeer(peer);
-    if (removed) {
-      routingInformation.displayRoutingInformation();
-    }
-  }
-
-  private void integrateNewPeer(Event event) {
-    PeerBroadcast broadcast = (PeerBroadcast) event;
-    boolean added = routingInformation.addPeer(broadcast.getPeer());
-    for (PeerInformation peer : broadcast.getContents()) {
-      if (!self.equals(peer)) {
-        if (routingInformation.addPeer(peer)) {
-          added = true;
-        }
-      }
-    }
-    if (added) {
-      System.out.println("ROUTING UPDATED:");
-      routingInformation.displayRoutingInformation();
-      migrateFiles();
-    }
-  }
-
-  private void buildRoutingInformation(JoinMessage joinMessage) {
-    routingInformation.initialize(self, joinMessage, connections);
-  }
-
-  private void attachRoutingInformation(JoinMessage message) {
-    routingInformation.attachRoutingToJoinMessage(message);
-    message.getHops().add(self);
-
-    String key = message.getDestination().getIdentifier();
-    int hop = message.getHops().size();
-    PeerInformation next = relay(key, message, hop);
-    if (self.equals(next)) { // Forward directly to destination
-      String destAddress = message.getDestination().getAddress();
-      boolean sent = connections.send(destAddress, message, false);
-      // TODO create a function that will generate a log message for a
-      //  message relay based on type and key and hop count and success
-      if (sent) {
-        logger.info("Message type " + message.getType() + " with key " + key +
-                    " relayed to " + key + ", hop " + hop);
-      } else {
-        logger.info("Join message couldn't be relayed to destination.");
-      }
-    }
-
-  }
-
-  private void collisionHandler() {
-    self.setIdentifier(PeerInformation.generateIdentifier());
-    sendRegistrationToDiscovery();
-  }
-
-  /**
-   * Interprets the response from the Discovery node concerning a registration
-   * request. If the response's attached PeerInformation is equal to this Peer's
-   * PeerInformation, no other Peer is contacted. Otherwise, a SPECIAL_JOIN
-   * message is sent to the random peer.
-   *
-   * @param event message being processed
-   */
-  private void registrationHandler(Event event) {
-    if (event.getType() == Protocol.NO_PEERS) {
-      printRegistrationDetails(null);
-      routingInformation.initialize(self, null, null);
-    } else {
-      PeerInformation selectPeer = ((PeerMessage) event).getPeer();
-      JoinMessage joinMessage = new JoinMessage(self);
-      joinMessage.getHops().add(self);
-      if (!connections.send(selectPeer.getAddress(), joinMessage, false)) {
-        PeerMessage select = new PeerMessage(Protocol.SELECT_REQUEST, self);
-        connections.send(ApplicationProperties.discoveryAddress, select, true);
-      } else {
-        printRegistrationDetails(selectPeer);
-      }
-    }
-  }
-
-  private void printRegistrationDetails(PeerInformation randomPeer) {
-    System.out.println("Registered as " + self);
-    if (randomPeer != null) {
-      System.out.println("Entry peer: " + randomPeer);
-    } else {
-      System.out.println("We are the first peer to join the network.");
-    }
-  }
-
 
   // Assumes that the Peer has already been initialized
   private Path getFilePath(String filename) {
