@@ -21,6 +21,7 @@ import java.util.Scanner;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.stream.Stream;
 
 public class StoreData implements Node {
 
@@ -103,9 +104,7 @@ public class StoreData implements Node {
     if (op != null) {
       if (peer == null) {
         logger.info("Cannot " + op.type() + " " + op.path() + ". No peers.");
-        if (op.type().equals(DELETE)) {
-          storedFiles.clear();
-        }
+        storedFiles.clear();
       } else {
         initiateOperation(peer, op);
       }
@@ -236,15 +235,15 @@ public class StoreData implements Node {
       switch (splitCommand[0].toLowerCase()) {
 
         case "s", "store":
-          store(splitCommand);
+          createOperation(STORE, splitCommand);
           break;
 
         case "r", "retrieve":
-          retrieve(splitCommand);
+          createOperation(RETRIEVE, splitCommand);
           break;
 
         case "d", "delete":
-          delete(splitCommand);
+          createOperation(DELETE, splitCommand);
           break;
 
         case "f", "files":
@@ -253,6 +252,10 @@ public class StoreData implements Node {
 
         case "wd":
           printWorkingDirectory(splitCommand);
+          break;
+
+        case "ls":
+          printFilesInWorkingDirectory();
           break;
 
         case "h", "help":
@@ -270,63 +273,52 @@ public class StoreData implements Node {
     System.exit(0);
   }
 
+  public void printFilesInWorkingDirectory() {
+    // ANSI escape code constants for text colors
+    String RESET = "\u001B[0m";
+    String BLUE = "\u001B[34m";
+
+    try (Stream<Path> fileStream = Files.walk(workingDirectory, 1)) {
+      fileStream.forEach(path -> {
+        if (!path.equals(workingDirectory)) {
+          if (Files.isDirectory(path)) {
+            System.out.println(
+                "  " + BLUE + path.getFileName().toString() + RESET);
+          } else if (Files.isRegularFile(path)) {
+            System.out.println("  " + path.getFileName().toString());
+          }
+        }
+      });
+    } catch (IOException e) {
+      logger.info(
+          "Error encountered walking the working directory. " + e.getMessage());
+    }
+  }
+
   private void displayFiles() {
     storedFiles.forEach(path -> {
       System.out.printf("%2s%s%n", "", path.toString());
     });
   }
 
-  private void store(String[] command) {
+  private void createOperation(String type, String[] command) {
     if (command.length == 1) {
       logger.error("You must provide a filename. Use 'help' for usage.");
       return;
     }
 
-    Path path = parsePath(command[1]);
-    Operation storeOp = new Operation(STORE, path);
-    ops.add(storeOp);
+    // If type == STORE, need full local path of file to read it
+    Path path =
+        type.equals(STORE) ? parsePath(command[1]) : Paths.get(command[1]);
+
+    Operation operation = new Operation(type, path);
+    ops.add(operation);
 
     GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
     boolean sentMessage =
         connections.send(ApplicationProperties.discoveryAddress, select, true);
     if (!sentMessage) {
-      ops.remove(storeOp);
-    }
-  }
-
-  private void retrieve(String[] command) {
-    if (command.length == 1) {
-      logger.error("You must provide a filename. Use 'help' for usage.");
-      return;
-    }
-
-    Path path = Paths.get(command[1]);
-    Operation retrieveOp = new Operation(RETRIEVE, path);
-    ops.add(retrieveOp);
-
-    GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
-    boolean sentMessage =
-        connections.send(ApplicationProperties.discoveryAddress, select, true);
-    if (!sentMessage) {
-      ops.remove(retrieveOp);
-    }
-  }
-
-  private void delete(String[] command) {
-    if (command.length == 1) {
-      logger.error("You must provide a filename. Use 'help' for usage.");
-      return;
-    }
-
-    Path path = Paths.get(command[1]);
-    Operation deleteOp = new Operation(DELETE, path);
-    ops.add(deleteOp);
-
-    GeneralMessage select = new GeneralMessage(Protocol.SELECT_REQUEST);
-    boolean sentMessage =
-        connections.send(ApplicationProperties.discoveryAddress, select, true);
-    if (!sentMessage) {
-      ops.remove(deleteOp);
+      ops.remove(operation);
     }
   }
 
@@ -403,6 +395,8 @@ public class StoreData implements Node {
         "list the files this node has stored");
     System.out.printf("%2s%-21s : %s%n", "", "wd [new_workdir]",
         "print the current working directory or change it");
+    System.out.printf("%2s%-21s : %s%n", "", "ls",
+        "perform an ls command for the working directory");
     System.out.printf("%2s%-21s : %s%n", "", "e[xit]", "shut down this node");
     System.out.printf("%2s%-21s : %s%n", "", "h[elp]",
         "print a list of valid commands");

@@ -338,6 +338,7 @@ public class Peer implements Node {
   private void removePeerFromRouting(PeerInformation peer) {
     boolean removed = routingInformation.removePeer(peer);
     if (removed) {
+      System.out.println("ROUTING UDPATED:");
       routingInformation.displayRoutingInformation();
     }
   }
