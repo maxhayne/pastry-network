@@ -430,7 +430,7 @@ public class Peer implements Node {
     System.out.printf("%2s%-9s : %s%n", "", "r[outing]",
         "print routing table and leaf set for this node");
     System.out.printf("%2s%-9s : %s%n", "", "f[iles]",
-        "print the list of files stored at this node");
+        "print the list of files stored at this node, with their read count");
     System.out.printf("%2s%-9s : %s%n", "", "l[eave]", "leave the network");
     System.out.printf("%2s%-9s : %s%n", "", "h[elp]",
         "print a list of valid commands");
@@ -460,7 +460,8 @@ public class Peer implements Node {
       logger.debug("Waiting 1 second for sockets to clear.");
       Thread.sleep(1000);
     } catch (InterruptedException e) {
-      logger.error("Interrupted. " + e.getMessage());
+      Thread.currentThread().interrupt();
+      throw new RuntimeException(e);
     }
   }
 
