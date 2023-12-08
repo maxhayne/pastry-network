@@ -265,7 +265,7 @@ public class Peer implements Node {
           closestPeer = relay(key, message, message.getHops());
           if (!self.equals(closestPeer)) {
             files.deleteFile(path);
-            logger.debug("File " + path + " was relocated to " +
+            logger.info("File " + path + " was relocated to " +
                          closestPeer.getIdentifier() + " and deleted.");
           } else {
             logger.debug("File " + path + "was not relocated.");
