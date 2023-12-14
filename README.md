@@ -3,7 +3,7 @@ This is an implementation of a [pastry](https://en.wikipedia.org/wiki/Pastry_(DH
 
 ## Node types
 
-It is constituted with three types of nodes -- the *Discovery*, *Peer*, and *StoreData*.
+It is constituted of three types of nodes -- the *Discovery*, *Peer*, and *StoreData*.
 
 The *Discovery* keeps track of *live* peers in the network.
 
